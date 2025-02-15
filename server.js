@@ -39,17 +39,14 @@ mongoose
 
 const app = express();
 
-// mongoose
-//   .connect("db_url")
-//   .then(() => console.log("MongoDB connected"))
-//   .catch((error) => console.log(error));
-
-// const app = express();
-// const PORT = process.env.PORT || 5000;
 
 app.use(
   cors({
-    origin: "http://localhost:5173",
+    // origin: "http://localhost:5173",
+    origin: [
+      "http://localhost:5173",          // Dev origin
+      "https://t-billz-clothings-frontend.vercel.app" // Production origin (example)
+    ],
     methods: ["GET", "POST", "DELETE", "PUT"],
     allowedHeaders: [
       "Content-Type",
