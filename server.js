@@ -45,7 +45,7 @@ app.use(
     // origin: "http://localhost:5173",
     origin: [
       "http://localhost:5173",          // Dev origin
-      "https://t-billz-clothings-frontend.vercel.app" // Production origin (example)
+      "https://tbillzclothings.vercel.app" // Production origin (example)
     ],
     methods: ["GET", "POST", "DELETE", "PUT"],
     allowedHeaders: [
