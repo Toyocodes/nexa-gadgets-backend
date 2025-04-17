@@ -8,7 +8,7 @@ const addToCart = async (req, res) => {
     if (!userId || !productId || quantity <= 0) {
       return res.status(400).json({
         success: false,
-        message: "Invalid data provided!",
+        message: "Please login to add product to cart!",
       });
     }
 
@@ -177,7 +177,7 @@ const deleteCartItem = async (req, res) => {
     if (!userId || !productId) {
       return res.status(400).json({
         success: false,
-        message: "Invalid data provided!",
+        message: "You cannot delete cart item if not logged in!",
       });
     }
 
