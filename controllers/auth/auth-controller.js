@@ -1,6 +1,8 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const User = require("../../models/User");
+const crypto = require("crypto");
+const nodemailer = require("nodemailer");
 
 //register
 const registerUser = async (req, res) => {
@@ -47,10 +49,10 @@ const loginUser = async (req, res) => {
         message: "User doesn't exists! Please register first",
       });
 
-      //compare password
+    //compare password
     const checkPasswordMatch = await bcrypt.compare(
       password,
-      checkUser.password
+      checkUser.password,
     );
     if (!checkPasswordMatch)
       return res.json({
@@ -66,19 +68,25 @@ const loginUser = async (req, res) => {
         userName: checkUser.userName,
       },
       "CLIENT_SECRET_KEY",
-      { expiresIn: "1440m" }
+      { expiresIn: "1440m" },
     );
 
-    res.cookie("token", token, { httpOnly: true, secure: true , sameSite: "none" }).json({
-      success: true,
-      message: "Logged in successfully",
-      user: {
-        email: checkUser.email,
-        role: checkUser.role,
-        id: checkUser._id,
-        userName: checkUser.userName,
-      },
-    });
+    res
+      .cookie("token", token, {
+        httpOnly: true,
+        secure: true,
+        sameSite: "none",
+      })
+      .json({
+        success: true,
+        message: "Logged in successfully",
+        user: {
+          email: checkUser.email,
+          role: checkUser.role,
+          id: checkUser._id,
+          userName: checkUser.userName,
+        },
+      });
   } catch (e) {
     console.log(e);
     res.status(500).json({
@@ -95,6 +103,141 @@ const logoutUser = (req, res) => {
     success: true,
     message: "Logged out successfully!",
   });
+};
+
+// Forgot Password
+const forgotPassword = async (req, res) => {
+  const { email } = req.body;
+
+  try {
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    // Generate token
+    const resetToken = crypto.randomBytes(32).toString("hex");
+
+    // Hash token before saving
+    const hashedToken = crypto
+      .createHash("sha256")
+      .update(resetToken)
+      .digest("hex");
+
+    user.resetPasswordToken = hashedToken;
+    user.resetPasswordExpire = Date.now() + 10 * 60 * 1000; // 10 mins
+
+    await user.save();
+
+    // Create reset URL (frontend link)
+    const resetUrl = `${process.env.CLIENT_URL}/reset-password/${resetToken}`;
+
+    // Setup email transporter
+    const transporter = nodemailer.createTransport({
+      host: "smtp.gmail.com",
+      port: 465,
+      secure: true,
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
+
+    const message = `
+      You requested a password reset.
+      Click the link below to reset your password:
+
+      ${resetUrl}
+
+      This link expires in 10 minutes.
+    `;
+
+    await transporter.sendMail({
+      from: `"Tmobilestore" <${process.env.EMAIL_USER}>`,
+      to: user.email,
+      subject: "Password Reset Request",
+      text: message,
+      html: `
+    <div style="font-family: Arial, sans-serif; line-height: 1.5;">
+      <h2>Password Reset Request</h2>
+      <p>You requested to reset your password.</p>
+      <p>Click the button below to reset your password:</p>
+
+      <a href="${resetUrl}" 
+         style="
+           display: inline-block;
+           padding: 12px 20px;
+           background-color: black;
+           color: white;
+           text-decoration: none;
+           border-radius: 5px;
+           margin: 10px 0;
+         ">
+         Reset Password
+      </a>
+
+      <p>If you didn’t request this, you can ignore this email.</p>
+      <p>This link expires in 10 minutes.</p>
+    </div>
+  `,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Password reset email sent",
+    });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({
+      success: false,
+      message: "Email could not be sent",
+    });
+  }
+};
+
+// Reset Password
+const resetPassword = async (req, res) => {
+  const { token } = req.params;
+  const { password } = req.body;
+
+  try {
+    const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
+
+    const user = await User.findOne({
+      resetPasswordToken: hashedToken,
+      resetPasswordExpire: { $gt: Date.now() },
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or expired token",
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    user.password = hashedPassword;
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpire = undefined;
+
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Password reset successful",
+    });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({
+      success: false,
+      message: "Password reset failed",
+    });
+  }
 };
 
 //auth middleware
@@ -118,4 +261,11 @@ const authMiddleware = async (req, res, next) => {
   }
 };
 
-module.exports = { registerUser, loginUser, logoutUser, authMiddleware };
+module.exports = {
+  registerUser,
+  loginUser,
+  logoutUser,
+  authMiddleware,
+  forgotPassword,
+  resetPassword,
+};
