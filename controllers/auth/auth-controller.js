@@ -4,7 +4,13 @@ const User = require("../../models/User");
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
 
-//register
+const getTokenCookieOptions = () => ({
+  httpOnly: true,
+  path: "/",
+  sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+  secure: process.env.NODE_ENV === "production",
+});
+
 const registerUser = async (req, res) => {
   const { userName, email, password } = req.body;
 
@@ -24,6 +30,7 @@ const registerUser = async (req, res) => {
     });
 
     await newUser.save();
+
     res.status(200).json({
       success: true,
       message: "Registration successful",
@@ -37,7 +44,6 @@ const registerUser = async (req, res) => {
   }
 };
 
-//login
 const loginUser = async (req, res) => {
   const { email, password } = req.body;
 
@@ -49,11 +55,7 @@ const loginUser = async (req, res) => {
         message: "User doesn't exists! Please register first",
       });
 
-    //compare password
-    const checkPasswordMatch = await bcrypt.compare(
-      password,
-      checkUser.password,
-    );
+    const checkPasswordMatch = await bcrypt.compare(password, checkUser.password);
     if (!checkPasswordMatch)
       return res.json({
         success: false,
@@ -68,15 +70,11 @@ const loginUser = async (req, res) => {
         userName: checkUser.userName,
       },
       "CLIENT_SECRET_KEY",
-      { expiresIn: "1440m" },
+      { expiresIn: "1440m" }
     );
 
     res
-      .cookie("token", token, {
-        httpOnly: true,
-        secure: true,
-        sameSite: "none",
-      })
+      .cookie("token", token, getTokenCookieOptions())
       .json({
         success: true,
         message: "Logged in successfully",
@@ -96,16 +94,13 @@ const loginUser = async (req, res) => {
   }
 };
 
-//logout
-
 const logoutUser = (req, res) => {
-  res.clearCookie("token").json({
+  res.clearCookie("token", getTokenCookieOptions()).json({
     success: true,
     message: "Logged out successfully!",
   });
 };
 
-// Forgot Password
 const forgotPassword = async (req, res) => {
   const { email } = req.body;
 
@@ -119,24 +114,18 @@ const forgotPassword = async (req, res) => {
       });
     }
 
-    // Generate token
     const resetToken = crypto.randomBytes(32).toString("hex");
-
-    // Hash token before saving
     const hashedToken = crypto
       .createHash("sha256")
       .update(resetToken)
       .digest("hex");
 
     user.resetPasswordToken = hashedToken;
-    user.resetPasswordExpire = Date.now() + 10 * 60 * 1000; // 10 mins
-
+    user.resetPasswordExpire = Date.now() + 10 * 60 * 1000;
     await user.save();
 
-    // Create reset URL (frontend link)
     const resetUrl = `${process.env.CLIENT_URL}/auth/reset-password/${resetToken}`;
 
-    // Setup email transporter
     const transporter = nodemailer.createTransport({
       host: "smtp.gmail.com",
       port: 465,
@@ -199,7 +188,6 @@ const forgotPassword = async (req, res) => {
   }
 };
 
-// Reset Password
 const resetPassword = async (req, res) => {
   const { token } = req.params;
   const { password } = req.body;
@@ -240,9 +228,9 @@ const resetPassword = async (req, res) => {
   }
 };
 
-//auth middleware
 const authMiddleware = async (req, res, next) => {
   const token = req.cookies.token;
+
   if (!token)
     return res.status(401).json({
       success: false,
