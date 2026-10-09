@@ -157,7 +157,7 @@ const forgotPassword = async (req, res) => {
     `;
 
     await transporter.sendMail({
-      from: `"Tmobilestore" <${process.env.EMAIL_USER}>`,
+      from: `"Nexagadgets" <${process.env.EMAIL_USER}>`,
       to: user.email,
       subject: "Password Reset Request",
       text: message,
