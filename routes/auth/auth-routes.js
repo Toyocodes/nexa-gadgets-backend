@@ -6,6 +6,11 @@ const {
   authMiddleware,
   forgotPassword,
   resetPassword,
+  getMe,
+  updateMe,
+  changePassword,
+  requestMagicLink,
+  verifyMagicLink,
 } = require("../../controllers/auth/auth-controller");
 
 const router = express.Router();
@@ -24,5 +29,14 @@ router.get("/check-auth", authMiddleware, (req, res) => {
 
 router.post("/forgot-password", forgotPassword);
 router.put("/reset-password/:token", resetPassword);
+
+// Account details
+router.get("/me", authMiddleware, getMe);
+router.put("/me", authMiddleware, updateMe);
+router.put("/change-password", authMiddleware, changePassword);
+
+// Email sign-in link
+router.post("/magic-link", requestMagicLink);
+router.post("/magic-link/verify", verifyMagicLink);
 
 module.exports = router;

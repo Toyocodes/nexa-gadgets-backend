@@ -1,26 +1,38 @@
 const Address = require("../../models/Address");
 
+const REQUIRED_FIELDS = ["address", "city", "phone"];
+const EDITABLE_FIELDS = ["address", "city", "pincode", "phone", "notes"];
+
+// Copies only known address fields from the request body, trimming strings.
+const pickAddressFields = (body) =>
+  EDITABLE_FIELDS.reduce((fields, key) => {
+    if (body[key] !== undefined) {
+      fields[key] = typeof body[key] === "string" ? body[key].trim() : body[key];
+    }
+    return fields;
+  }, {});
+
+const missingRequired = (fields) => REQUIRED_FIELDS.filter((key) => !fields[key]);
+
 const addAddress = async (req, res) => {
   try {
-    const { userId, address, city, pincode, phone, notes } = req.body;
+    const { userId } = req.body;
+    const fields = pickAddressFields(req.body);
+    const missing = missingRequired(fields);
 
-    if (!userId || !address || !city || !pincode || !phone || !notes) {
+    if (!userId || missing.length) {
       return res.status(400).json({
         success: false,
-        message: "Invalid data provided!",
+        message: `Please fill in: ${missing.join(", ")}`,
       });
     }
 
-    const newlyCreatedAddress = new Address({
+    const newlyCreatedAddress = await Address.create({
       userId,
-      address,
-      city,
-      pincode,
-      notes,
-      phone,
+      pincode: "",
+      notes: "",
+      ...fields,
     });
-
-    await newlyCreatedAddress.save();
 
     res.status(201).json({
       success: true,
@@ -63,7 +75,6 @@ const fetchAllAddress = async (req, res) => {
 const editAddress = async (req, res) => {
   try {
     const { userId, addressId } = req.params;
-    const formData = req.body;
 
     if (!userId || !addressId) {
       return res.status(400).json({
@@ -72,14 +83,18 @@ const editAddress = async (req, res) => {
       });
     }
 
-    const address = await Address.findOneAndUpdate(
-      {
-        _id: addressId,
-        userId,
-      },
-      formData,
-      { new: true }
-    );
+    const fields = pickAddressFields(req.body);
+    const clearedRequired = REQUIRED_FIELDS.filter((key) => key in fields && !fields[key]);
+    if (clearedRequired.length) {
+      return res.status(400).json({
+        success: false,
+        message: `These fields cannot be empty: ${clearedRequired.join(", ")}`,
+      });
+    }
+
+    const address = await Address.findOneAndUpdate({ _id: addressId, userId }, fields, {
+      new: true,
+    });
 
     if (!address) {
       return res.status(404).json({

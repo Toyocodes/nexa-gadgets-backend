@@ -21,10 +21,21 @@ const UserSchema = new mongoose.Schema(
       default: "user",
       // enum: ["user", "admin"],
     },
+    marketingOptIn: {
+      type: Boolean,
+      default: false,
+    },
     resetPasswordToken: {
       type: String,
     },
     resetPasswordExpire: {
+      type: Date,
+    },
+    // One-time "email me a sign-in link" token (stored hashed, like the reset token).
+    loginToken: {
+      type: String,
+    },
+    loginTokenExpire: {
       type: Date,
     },
   },

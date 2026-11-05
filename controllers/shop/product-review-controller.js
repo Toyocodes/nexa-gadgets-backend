@@ -2,15 +2,37 @@ const Order = require("../../models/Order");
 const Product = require("../../models/Product");
 const ProductReview = require("../../models/Review");
 
+// Recalculates a product's averageReview and numReviews from its reviews.
+const refreshProductRating = async (productId) => {
+  const [stats] = await ProductReview.aggregate([
+    { $match: { productId } },
+    { $group: { _id: null, average: { $avg: "$reviewValue" }, count: { $sum: 1 } } },
+  ]);
+
+  await Product.findByIdAndUpdate(productId, {
+    averageReview: stats ? Math.round(stats.average * 10) / 10 : 0,
+    numReviews: stats ? stats.count : 0,
+  });
+};
+
 const addProductReview = async (req, res) => {
   try {
-    const { productId, userId, reviewMessage, reviewValue } = req.body;
+    const { productId, userId, reviewMessage } = req.body;
+    const reviewValue = Number(req.body.reviewValue);
     const userName = req.user.userName;
 
+    if (!productId || !Number.isInteger(reviewValue) || reviewValue < 1 || reviewValue > 5) {
+      return res.status(400).json({
+        success: false,
+        message: "Choose a rating from 1 to 5 stars",
+      });
+    }
+
+    // Only a paid order counts as a purchase.
     const order = await Order.findOne({
       userId,
       "cartItems.productId": productId,
-      // orderStatus: "confirmed" || "delivered",
+      paymentStatus: "paid",
     });
 
     if (!order) {
@@ -20,19 +42,15 @@ const addProductReview = async (req, res) => {
       });
     }
 
-    const checkExistinfReview = await ProductReview.findOne({
-      productId,
-      userId,
-    });
-
-    if (checkExistinfReview) {
+    const existingReview = await ProductReview.findOne({ productId, userId });
+    if (existingReview) {
       return res.status(400).json({
         success: false,
         message: "You already reviewed this product!",
       });
     }
 
-    const newReview = new ProductReview({
+    const newReview = await ProductReview.create({
       productId,
       userId,
       userName,
@@ -40,15 +58,7 @@ const addProductReview = async (req, res) => {
       reviewValue,
     });
 
-    await newReview.save();
-
-    const reviews = await ProductReview.find({ productId });
-    const totalReviewsLength = reviews.length;
-    const averageReview =
-      reviews.reduce((sum, reviewItem) => sum + reviewItem.reviewValue, 0) /
-      totalReviewsLength;
-
-    await Product.findByIdAndUpdate(productId, { averageReview });
+    await refreshProductRating(productId);
 
     res.status(201).json({
       success: true,
@@ -67,7 +77,7 @@ const getProductReviews = async (req, res) => {
   try {
     const { productId } = req.params;
 
-    const reviews = await ProductReview.find({ productId });
+    const reviews = await ProductReview.find({ productId }).sort({ createdAt: -1 });
     res.status(200).json({
       success: true,
       data: reviews,
@@ -81,4 +91,4 @@ const getProductReviews = async (req, res) => {
   }
 };
 
-module.exports = { addProductReview, getProductReviews };
+module.exports = { addProductReview, getProductReviews, refreshProductRating };
