@@ -12,11 +12,12 @@ const {
   requestMagicLink,
   verifyMagicLink,
 } = require("../../controllers/auth/auth-controller");
+const { authLimiter, emailLimiter } = require("../../middleware/rate-limit");
 
 const router = express.Router();
 
-router.post("/register", registerUser);
-router.post("/login", loginUser);
+router.post("/register", authLimiter, registerUser);
+router.post("/login", authLimiter, loginUser);
 router.post("/logout", logoutUser);
 router.get("/check-auth", authMiddleware, (req, res) => {
   const user = req.user;
@@ -27,16 +28,16 @@ router.get("/check-auth", authMiddleware, (req, res) => {
   });
 });
 
-router.post("/forgot-password", forgotPassword);
-router.put("/reset-password/:token", resetPassword);
+router.post("/forgot-password", emailLimiter, forgotPassword);
+router.put("/reset-password/:token", authLimiter, resetPassword);
 
 // Account details
 router.get("/me", authMiddleware, getMe);
 router.put("/me", authMiddleware, updateMe);
-router.put("/change-password", authMiddleware, changePassword);
+router.put("/change-password", authLimiter, authMiddleware, changePassword);
 
 // Email sign-in link
-router.post("/magic-link", requestMagicLink);
-router.post("/magic-link/verify", verifyMagicLink);
+router.post("/magic-link", emailLimiter, requestMagicLink);
+router.post("/magic-link/verify", authLimiter, verifyMagicLink);
 
 module.exports = router;

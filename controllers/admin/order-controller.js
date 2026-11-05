@@ -55,6 +55,13 @@ const updateOrderStatus = async (req, res) => {
     const { id } = req.params;
     const { orderStatus } = req.body;
 
+    if (!Order.ORDER_STATUSES.includes(orderStatus)) {
+      return res.status(400).json({
+        success: false,
+        message: `orderStatus must be one of: ${Order.ORDER_STATUSES.join(", ")}`,
+      });
+    }
+
     const order = await Order.findById(id);
 
     if (!order) {
@@ -64,7 +71,7 @@ const updateOrderStatus = async (req, res) => {
       });
     }
 
-    await Order.findByIdAndUpdate(id, { orderStatus });
+    await Order.findByIdAndUpdate(id, { orderStatus, orderUpdateDate: new Date() });
 
     res.status(200).json({
       success: true,

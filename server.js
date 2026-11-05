@@ -21,7 +21,10 @@ const shopReviewRouter = require("./routes/shop/review-routes");
 
 const commonFeatureRouter = require("./routes/common/feature-routes");
 const wishlistRouter = require("./routes/shop/wishlist-routes");
+const shopDeliveryRouter = require("./routes/shop/delivery-routes");
+const adminDeliveryRouter = require("./routes/admin/delivery-routes");
 const { authenticate, requireAdmin } = require("./middleware/auth");
+const { ensureDefaultDeliveryOptions } = require("./controllers/common/delivery-controller");
 
 //create a database connection -> u can also
 //create a separate file for this and then import/use that file here
@@ -32,14 +35,20 @@ const PORT = process.env.PORT || 5000;
 
 // Connect to MongoDB
 mongoose
-  .connect(MONGO_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
+  .connect(MONGO_URI)
+  .then(async () => {
+    console.log("✅ MongoDB connected successfully!");
+    await ensureDefaultDeliveryOptions();
   })
-  .then(() => console.log("✅ MongoDB connected successfully!"))
   .catch((error) => console.error("❌ MongoDB connection error:", error));
 
 const app = express();
+
+// Behind a hosting proxy (Render, Railway…) trust the first hop so rate
+// limiting sees the real client IP instead of the proxy's.
+if (process.env.NODE_ENV === "production") {
+  app.set("trust proxy", 1);
+}
 
 
 app.use(
@@ -70,6 +79,8 @@ app.use("/api/admin", authenticate, requireAdmin);
 app.use("/api/admin/products", adminProductsRouter);
 app.use("/api/admin/orders", adminOrderRouter);
 app.use("/api/admin/analytics", analyticsRouter);
+app.use("/api/admin/delivery-options", adminDeliveryRouter);
+app.use("/api/shop/delivery-options", shopDeliveryRouter);
 app.use("/api/shop/products", shopProductsRouter);
 app.use("/api/shop/cart", shopCartRouter);
 app.use("/api/shop/address", shopAddressRouter);

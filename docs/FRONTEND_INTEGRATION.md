@@ -4,9 +4,13 @@ This guide is for whoever builds the redesigned shopping UI in the frontend repo
 (`nexa-gadgets-frontend`). It lists every backend endpoint that changed or was
 added, the exact request and response shapes, and where each one is used in the new design.
 
-- **Design to build:** https://claude.ai/artifact/29PJWeeWEZTVnsB8WRHVSb (12 screens: desktop
+- **Design to build:** https://claude.ai/artifact/29PJWeeWEZTVnsB8WRHVSb (13 screens: desktop
   Home, Listing, Product, Cart drawer, Checkout, Account/Orders, Sign in, Create account; mobile
-  Home, Product, Checkout, Create account).
+  Home, Product, Checkout, Create account; and Admin › Delivery & pickup).
+- **Business rules:** there is **no free delivery**. Customers choose **pickup (₦0)** or a **paid
+  delivery zone** (Lagos Mainland ₦5,000 and Lagos Island ₦8,000 by default). Admins can change the
+  fees at any time, so **never hard-code fees**; always read them from the API (§8). Payment is
+  **bank transfer only**, through Paystack. Pickup orders are also paid online before collection.
 - **Base URL:** `import.meta.env.VITE_API_URL` (e.g. `http://localhost:5000/api`). Use the existing
   axios instance in `src/lib/axios.js`; it already sends cookies (`withCredentials: true`).
 - **Auth:** a JWT in an httpOnly `token` cookie. The frontend never reads or stores the token.
@@ -47,6 +51,13 @@ unknown email or a wrong password. It now returns `400` only when the email or p
 **Session errors:** a `401` from any shop endpoint means the session is missing or expired. Send the
 user to `/auth/login`. A `403` means they tried to touch another user's data, or a non-admin hit an
 admin route.
+
+**Rate limits (`429`):** auth endpoints are rate-limited per IP address.
+- Login, register, reset password, change password and sign-in-link verify: 20 requests per 15 minutes.
+- Forgot password and "email me a sign-in link": 5 requests per 15 minutes.
+
+A `429` comes back as `{ success: false, message: "Too many attempts…" }`. Show the message and
+disable the submit button for a moment.
 
 ---
 
@@ -305,51 +316,149 @@ In the new UI:
 - Phone has a fixed `+234` prefix in the design. Send the full number, e.g. `+2348012345678`.
 - **"Use a new address" at checkout:** first `POST /shop/address/add`, then use the returned
   `data._id` as `addressInfo.addressId` when creating the order (see §8). The "Save this address for
-  next time" checkbox can stay checked by default. The order needs a saved address either way.
+  next time" checkbox can stay checked by default. A delivery order needs a saved address either way.
+- Hide the whole address section when the chosen delivery option is **pickup**.
 
 ---
 
-## 8. Checkout, payment and orders (from the security pass, so the flow must follow this)
+## 8. Checkout: delivery method, payment and orders
 
-### `POST /shop/order/create` (login required)
+### `GET /shop/delivery-options` (new, public)
 
-The server builds the order from the **user's own cart and saved address in the database**. Only one
-field in the body matters:
+Returns the delivery options shoppers can choose right now, in display order:
 ```json
-{ "addressInfo": { "addressId": "<saved address _id>" } }
+{ "success": true, "data": [
+  { "_id": "…", "name": "Pickup", "type": "pickup", "fee": 0,
+    "description": "Collect your order from our store after paying online.", "sortOrder": 0 },
+  { "_id": "…", "name": "Lagos Mainland delivery", "type": "delivery", "fee": 5000,
+    "description": "Delivered to your address on the Lagos Mainland.", "sortOrder": 1 },
+  { "_id": "…", "name": "Lagos Island delivery", "type": "delivery", "fee": 8000,
+    "description": "Delivered to your address on Lagos Island.", "sortOrder": 2 }
+] }
 ```
-The other fields the current frontend sends (`cartItems`, `totalAmount`, `userId`, …) are ignored,
-so they can stay or go.
+- `type: "pickup"` → no address needed. `type: "delivery"` → a saved address is required.
+- `fee` is a whole number of naira. Admins can change fees, rename options, add zones or hide them
+  (§8b). **Render whatever this endpoint returns; don't hard-code options or fees.**
 
-Response: `201 { success: true, orderId, totalAmount }`.
+Checkout UI ("How do you want to get your order?" in the design, desktop and mobile):
+1. Fetch the options when checkout opens. Show each as a radio card with the name, the `₦fee`
+   (Geist Mono) and the description.
+2. Show the **Delivery address** section only when the selected option has `type: "delivery"`.
+3. The summary shows Subtotal, "Delivery · {option name}" with `₦fee`, and Total = subtotal + fee.
+   The pay button reads "Pay ₦{total} by transfer".
+4. Product page and cart copy: "Lagos delivery or store pickup", and in the cart, "Delivery: chosen
+   at checkout". Fees shown on the product page should come from this endpoint too. Never say "free
+   delivery".
+
+### `POST /shop/order/create` (changed, login required)
+
+The server builds the order from the **user's own cart**, the **chosen delivery option** and, for
+delivery, their **saved address**. The body is:
+```json
+{ "deliveryOptionId": "<_id from /shop/delivery-options>",
+  "addressInfo": { "addressId": "<saved address _id — required only for type: delivery>" } }
+```
+Other fields the current frontend sends (`cartItems`, `totalAmount`, `userId`, …) are ignored.
+`deliveryOptionId` is **required** now.
+
+Response:
+```json
+{ "success": true, "orderId": "…", "subtotal": 13483, "deliveryFee": 5000, "totalAmount": 18483 }
+```
 - **Use `totalAmount` from this response for the Paystack amount** (`amount: totalAmount * 100` in
-  kobo, `currency: "NGN"`). Don't use the total calculated in the browser. Verification fails if
-  they differ.
-- Errors (show as a toast or inline): `400 "Your cart is empty"`, `400 "Please select a valid address"`,
-  `400 "Only N of <product> left in stock"`.
+  kobo, `currency: "NGN"`). Don't use the total calculated in the browser. Verification fails if the
+  amount differs.
+- Errors (show as a toast or inline):
+  - `400 "Your cart is empty"`
+  - `400 "Please choose pickup or a delivery option"` (missing or inactive option)
+  - `400 "Please select a delivery address"`
+  - `400 "Only N of <product> left in stock"`
 
-### `PUT /shop/order/verify` (login required)
+### Paystack popup: bank transfer only
+
+Restrict the popup to transfer:
+```js
+window.PaystackPop.setup({
+  key: import.meta.env.VITE_PAYSTACK_PUBLIC_KEY,
+  email: user.email,
+  amount: totalAmount * 100,      // from the create-order response
+  currency: "NGN",
+  channels: ["bank_transfer"],    // REQUIRED: the server rejects any other channel
+  ref: reference,
+  callback, onClose,
+});
+```
+The design's payment card explains it: "Paystack gives you a one-time account number. Transfer the
+exact amount from any Nigerian bank app and your order confirms automatically." Remove the
+Card / USSD chips.
+
+### `PUT /shop/order/verify` (changed, login required)
 ```json
 { "reference": "<paystack reference>", "orderId": "<orderId>" }
 ```
 - Success → `200 { success: true, message: "Order confirmed", data: order }`.
 - Calling it again for an order that's already paid also returns `200 success` (safe to retry).
 - `400 "Payment verification failed"` if Paystack doesn't confirm the exact amount in NGN.
+- **New:** `400 "Only bank transfer payments are accepted. Please contact us for a refund."` if the
+  payment came through any channel other than bank transfer. The order stays unpaid. Show the message
+  and a contact link.
 - `404` if the order doesn't belong to the logged-in user.
 
 ### Orders in the Account page
 
 `GET /shop/order/list/:userId` (must be the logged-in user's id) and `GET /shop/order/details/:id`.
+Orders now include:
+```json
+{ "subtotal": 13483, "deliveryFee": 5000, "totalAmount": 18483, "paymentChannel": "bank_transfer",
+  "deliveryMethod": { "optionId": "…", "name": "Lagos Mainland delivery", "type": "delivery", "fee": 5000, "description": "…" } }
+```
+`deliveryMethod` is a snapshot from checkout time, so later fee changes don't affect it. Pickup
+orders have no `addressInfo`. Older orders created before this change have no `deliveryMethod`;
+treat them as delivery orders.
 
 | Order field | Values | UI |
 |---|---|---|
 | `paymentStatus` | `pending`, `paid` | `pending` → amber "Awaiting payment" card with **Complete payment** |
-| `orderStatus` | `pending`, `confirmed`, `inShipping`, `delivered`, `rejected` | progress tracker: Placed → Confirmed → In shipping → Delivered; `rejected` shows a red "Cancelled" pill instead of the tracker |
-| `orderDate`, `orderUpdateDate` | ISO dates | "Placed {date}", "Delivered {date}" |
+| `orderStatus` (delivery) | `pending`, `confirmed`, `inShipping`, `delivered`, `rejected` | tracker: Placed → Confirmed → In shipping → Delivered |
+| `orderStatus` (pickup) | `pending`, `confirmed`, `readyForPickup`, `delivered`, `rejected` | tracker: Placed → Confirmed → Ready for pickup → Collected (`delivered` means collected for pickup orders) |
+| `rejected` | | red "Cancelled" pill instead of the tracker |
+| `orderDate`, `orderUpdateDate` | ISO dates | "Placed {date}", "Delivered/Collected {date}" |
+
+Show `deliveryMethod.name` next to the date and include the delivery fee in the order details
+breakdown.
 
 **Complete payment** (pending orders): fetch `GET /shop/order/details/:id`, then open the same
-Paystack popup with `order._id` and `order.totalAmount`, storing `currentOrderId` in sessionStorage
-as checkout does now, so `/shop/paystack-return` verifies it. No new endpoint is needed.
+transfer-only Paystack popup with `order._id` and `order.totalAmount` (which already includes the
+delivery fee). Store `currentOrderId` in sessionStorage as checkout does now, so
+`/shop/paystack-return` verifies it. No new endpoint is needed.
+
+### 8b. Admin › Delivery & pickup page (new admin screen)
+
+All of these require an admin account. In the design it's the "Admin · Delivery & pickup" screen.
+Add it to the admin sidebar.
+
+| Method | Path | Body | Result |
+|---|---|---|---|
+| `GET` | `/admin/delivery-options` | n/a | every option, **including inactive** ones |
+| `POST` | `/admin/delivery-options` | `{ name, type: "pickup" \| "delivery", fee, description?, active?, sortOrder? }` | `201 { data: option }` |
+| `PUT` | `/admin/delivery-options/:id` | any subset of the fields above | `200 { data: option }` |
+| `DELETE` | `/admin/delivery-options/:id` | n/a | `200` |
+
+Validation (`400` with a readable message):
+- `name` is required, up to 60 characters.
+- `type` must be `pickup` or `delivery`.
+- `fee` must be a whole number of naira, 0 or more.
+- `description` can be up to 300 characters.
+
+UI: one editable card per option, with Name, Type, Fee (with a ₦ prefix), a "Shown at checkout"
+toggle (`active`), Description, and Save / Delete buttons, plus an "Add option" button. Put the
+pickup address in the Pickup option's description. Suggest turning an option off rather than
+deleting it. Changes take effect at checkout immediately; existing orders keep their fee.
+
+**Admin order status:** `PUT /admin/orders/update/:id` now only accepts `pending`, `confirmed`,
+`inShipping`, `readyForPickup`, `delivered` or `rejected` (anything else → `400`). In the admin order
+dialog, offer "Ready for pickup" for pickup orders and "In shipping" for delivery orders.
+`orderUpdateDate` is set automatically.
 
 Each abandoned checkout leaves a pending order. In the list, show at most the most recent pending
 order prominently, or group them under "Awaiting payment".
@@ -365,15 +474,17 @@ order prominently, or group them under "Awaiting payment".
   current code already does this.
 - `/admin/*` and `POST /common/feature/add` require an admin account.
 - Public (no login): product list and details, search, the review list, `GET /common/feature/get`,
-  and the auth endpoints.
+  `GET /shop/delivery-options`, and the auth endpoints.
 
 ---
 
 ## 10. Not provided by the backend (frontend-only or placeholder)
 
-- **Delivery estimate** text ("[Delivery estimate]" in the design): fixed copy, or remove it.
+- **Pickup address:** put it in the Pickup option's `description` from the admin page. The
+  "[Pickup address]" placeholder in the design comes from there.
 - **Password strength meter** beyond the 8-character rule: client-side only.
 - **"You save ₦X"** in the cart: calculate it in the browser from `price − salePrice` per item.
-- **Free delivery in Lagos, warranty, 7-day returns:** static marketing copy.
+- **Manufacturer warranty, 7-day returns:** static marketing copy. **There is no free delivery**;
+  never show "free delivery" anywhere.
 - **Dark mode:** not in the design yet. Build the light theme first using CSS variables so dark mode
   can be added later.
