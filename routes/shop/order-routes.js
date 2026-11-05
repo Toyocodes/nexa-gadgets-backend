@@ -6,11 +6,14 @@ const {
   getOrderDetails,
   verifyPayment,
 } = require("../../controllers/shop/order-controller");
+const { authenticate, bindUserId } = require("../../middleware/auth");
 
 const router = express.Router();
 
-router.post("/create", createOrder);
-router.get("/list/:userId", getAllOrdersByUser);
+router.use(authenticate);
+
+router.post("/create", bindUserId, createOrder);
+router.get("/list/:userId", bindUserId, getAllOrdersByUser);
 router.get("/details/:id", getOrderDetails);
 router.put("/verify", verifyPayment);
 

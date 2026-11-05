@@ -10,7 +10,13 @@ const searchProducts = async (req, res) => {
       });
     }
 
-    const regEx = new RegExp(keyword, "i");
+    // Escape regex metacharacters so user input is matched literally
+    // (prevents regex injection / ReDoS), and cap the length.
+    const escaped = keyword
+      .trim()
+      .slice(0, 100)
+      .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regEx = new RegExp(escaped, "i");
 
     const createSearchQuery = {
       $or: [

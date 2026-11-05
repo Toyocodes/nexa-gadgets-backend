@@ -21,6 +21,7 @@ const shopReviewRouter = require("./routes/shop/review-routes");
 
 const commonFeatureRouter = require("./routes/common/feature-routes");
 const wishlistRouter = require("./routes/shop/wishlist-routes");
+const { authenticate, requireAdmin } = require("./middleware/auth");
 
 //create a database connection -> u can also
 //create a separate file for this and then import/use that file here
@@ -63,6 +64,9 @@ app.use(
 app.use(cookieParser());
 app.use(express.json());
 app.use("/api/auth", authRouter);
+
+// Every /api/admin/* route requires a logged-in user with role "admin".
+app.use("/api/admin", authenticate, requireAdmin);
 app.use("/api/admin/products", adminProductsRouter);
 app.use("/api/admin/orders", adminOrderRouter);
 app.use("/api/admin/analytics", analyticsRouter);
@@ -77,7 +81,4 @@ app.use("/api/common/feature", commonFeatureRouter);
 app.use("/api/shop/wishlist", wishlistRouter);
 
 app.listen(PORT, () => console.log(`Server is now running on port ${PORT}`));
-
-// require("dotenv").config({ path: "./.env" });
-console.log("MONGO_URI:", process.env.MONGO_URI); // Debugging
 

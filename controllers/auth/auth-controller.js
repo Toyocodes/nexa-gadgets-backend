@@ -1,8 +1,8 @@
 const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
 const User = require("../../models/User");
 const crypto = require("crypto");
 const nodemailer = require("nodemailer");
+const { signToken, authenticate } = require("../../middleware/auth");
 
 const getTokenCookieOptions = () => ({
   httpOnly: true,
@@ -62,16 +62,12 @@ const loginUser = async (req, res) => {
         message: "Incorrect password! Please try again",
       });
 
-    const token = jwt.sign(
-      {
-        id: checkUser._id,
-        role: checkUser.role,
-        email: checkUser.email,
-        userName: checkUser.userName,
-      },
-      "CLIENT_SECRET_KEY",
-      { expiresIn: "1440m" }
-    );
+    const token = signToken({
+      id: checkUser._id,
+      role: checkUser.role,
+      email: checkUser.email,
+      userName: checkUser.userName,
+    });
 
     res
       .cookie("token", token, getTokenCookieOptions())
@@ -228,32 +224,11 @@ const resetPassword = async (req, res) => {
   }
 };
 
-const authMiddleware = async (req, res, next) => {
-  const token = req.cookies.token;
-
-  if (!token)
-    return res.status(401).json({
-      success: false,
-      message: "Unauthorised user!",
-    });
-
-  try {
-    const decoded = jwt.verify(token, "CLIENT_SECRET_KEY");
-    req.user = decoded;
-    next();
-  } catch (error) {
-    res.status(401).json({
-      success: false,
-      message: "Unauthorised user!",
-    });
-  }
-};
-
 module.exports = {
   registerUser,
   loginUser,
   logoutUser,
-  authMiddleware,
+  authMiddleware: authenticate,
   forgotPassword,
   resetPassword,
 };
