@@ -48,6 +48,12 @@ In components, read `data.payload?.message` for both success and failure (or use
 **Login is the exception:** `POST /auth/login` still returns `200 { success: false, message }` for an
 unknown email or a wrong password. It now returns `400` only when the email or password is missing.
 
+**Field errors:** when an error is about one form input, the response also has a `field` key, e.g.
+`{ "success": false, "field": "email", "message": "That email is already in use" }`. Use it to show
+the message under that input, and show the message at form level when `field` is absent. Field names
+match the request body: `userName`, `email`, `password`, `currentPassword`, `newPassword`, `label`,
+`address`, `city`, `phone`, `notes`.
+
 **Session errors:** a `401` from any shop endpoint means the session is missing or expired. Send the
 user to `/auth/login`. A `403` means they tried to touch another user's data, or a non-admin hit an
 admin route.
@@ -171,6 +177,8 @@ All query parameters are optional:
 
 | Param | Example | Meaning |
 |---|---|---|
+| `q` | `iphone` | keyword in the title, description, category or brand (matched literally, capped at 100 characters) |
+| `ids` | `<id>,<id>` | only these products, up to 100; invalid ids are ignored (used for a guest's cart) |
 | `category` | `phones,laptop` | comma-separated category ids (from `src/config`) |
 | `brand` | `apple,techno` | comma-separated brand ids (**note: the Tecno id is `techno`**) |
 | `minPrice` / `maxPrice` | `0` / `20000` | filter on the **effective price** (`salePrice` if > 0, else `price`) |
@@ -301,15 +309,14 @@ review form. On the product page, keep the note "Only customers who bought this 
 
 `POST /shop/address/add` (login required):
 ```json
-{ "address": "12 Allen Avenue", "city": "Lagos", "phone": "+2348012345678", "pincode": "", "notes": "" }
+{ "label": "Home", "address": "12 Allen Avenue", "city": "Lagos", "phone": "+2348012345678", "pincode": "", "notes": "" }
 ```
-- **Required:** `address`, `city`, `phone`. **`pincode` and `notes` are optional** (they were
-  required before).
-- Missing fields → `400 "Please fill in: phone"`. The message names the missing fields, so show it
-  inline.
+- **Required:** `address`, `city`, `phone`. **`label`, `pincode` and `notes` are optional**.
+- `label` is up to 30 characters, e.g. "Home" or "Office". Otherwise → `400` with `field: "label"`.
+- Missing fields → `400 "Please fill in: phone"` with `field` set to the first missing field.
 
-`PUT /shop/address/update/:userId/:addressId` accepts only `address`, `city`, `pincode`, `phone` and
-`notes`; any other field is ignored. Setting a required field to an empty string → `400`.
+`PUT /shop/address/update/:userId/:addressId` accepts only `label`, `address`, `city`, `pincode`,
+`phone` and `notes`; any other field is ignored. Setting a required field to an empty string → `400`.
 
 In the new UI:
 - Label the fields "Postal code (optional)" and "Delivery notes (optional)".
@@ -318,6 +325,29 @@ In the new UI:
   `data._id` as `addressInfo.addressId` when creating the order (see §8). The "Save this address for
   next time" checkbox can stay checked by default. A delivery order needs a saved address either way.
 - Hide the whole address section when the chosen delivery option is **pickup**.
+
+---
+
+## 7b. Guest cart: `POST /shop/cart/merge` (new, login required)
+
+Guests keep `{ productId, quantity }` pairs in the browser and read live prices with
+`GET /shop/products/get?ids=…`. After sign-in, send them here once:
+```json
+{ "items": [{ "productId": "…", "quantity": 2 }] }
+```
+- Up to 50 entries, otherwise `400`. Duplicates are combined and malformed entries are ignored.
+- Quantities add to what's already in the account cart, capped at current stock. A quantity already
+  in the account cart is never lowered.
+- Missing or sold-out products don't fail the merge; they're reported in `adjustments`.
+
+Response (`data` has the same shape as `GET /shop/cart/get/:userId`):
+```json
+{ "success": true,
+  "data": { "_id": "…", "userId": "…", "items": [ /* cart lines */ ] },
+  "adjustments": [{ "productId": "…", "title": "Galaxy S24", "quantity": 2 }] }
+```
+Each adjustment is a line that ended up with less than requested. `quantity` is what's now in the
+cart. `title` is `null` and `quantity` is `0` if the product no longer exists.
 
 ---
 
@@ -356,8 +386,14 @@ The server builds the order from the **user's own cart**, the **chosen delivery 
 delivery, their **saved address**. The body is:
 ```json
 { "deliveryOptionId": "<_id from /shop/delivery-options>",
-  "addressInfo": { "addressId": "<saved address _id — required only for type: delivery>" } }
+  "addressInfo": { "addressId": "<saved address _id — required only for type: delivery>" },
+  "notes": "<optional, delivery only — up to 300 characters>" }
 ```
+`notes` is stored on the order as `deliveryNotes` and never changes the saved address. Leaving it out
+uses the saved address's notes; an empty string means no notes for this order. Show
+`order.deliveryNotes`, falling back to `addressInfo.notes` for older orders that don't have it.
+`addressInfo` also carries a snapshot of the address `label`.
+
 Other fields the current frontend sends (`cartItems`, `totalAmount`, `userId`, …) are ignored.
 `deliveryOptionId` is **required** now.
 
@@ -372,6 +408,7 @@ Response:
   - `400 "Your cart is empty"`
   - `400 "Please choose pickup or a delivery option"` (missing or inactive option)
   - `400 "Please select a delivery address"`
+  - `400 "Keep delivery notes to 300 characters or fewer"` with `field: "notes"`
   - `400 "Only N of <product> left in stock"`
 
 ### Paystack popup: bank transfer only
@@ -486,5 +523,4 @@ order prominently, or group them under "Awaiting payment".
 - **"You save ₦X"** in the cart: calculate it in the browser from `price − salePrice` per item.
 - **Manufacturer warranty, 7-day returns:** static marketing copy. **There is no free delivery**;
   never show "free delivery" anywhere.
-- **Dark mode:** not in the design yet. Build the light theme first using CSS variables so dark mode
-  can be added later.
+- **Dark mode:** handled entirely in the frontend.

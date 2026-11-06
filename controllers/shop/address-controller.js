@@ -1,7 +1,8 @@
 const Address = require("../../models/Address");
 
 const REQUIRED_FIELDS = ["address", "city", "phone"];
-const EDITABLE_FIELDS = ["address", "city", "pincode", "phone", "notes"];
+const EDITABLE_FIELDS = ["label", "address", "city", "pincode", "phone", "notes"];
+const LABEL_MAX_LENGTH = 30;
 
 // Copies only known address fields from the request body, trimming strings.
 const pickAddressFields = (body) =>
@@ -14,6 +15,15 @@ const pickAddressFields = (body) =>
 
 const missingRequired = (fields) => REQUIRED_FIELDS.filter((key) => !fields[key]);
 
+const isInvalidLabel = ({ label }) =>
+  label !== undefined && (typeof label !== "string" || label.length > LABEL_MAX_LENGTH);
+
+const invalidLabelResponse = {
+  success: false,
+  field: "label",
+  message: `Keep the label to ${LABEL_MAX_LENGTH} characters or fewer`,
+};
+
 const addAddress = async (req, res) => {
   try {
     const { userId } = req.body;
@@ -23,12 +33,17 @@ const addAddress = async (req, res) => {
     if (!userId || missing.length) {
       return res.status(400).json({
         success: false,
+        field: missing[0],
         message: `Please fill in: ${missing.join(", ")}`,
       });
+    }
+    if (isInvalidLabel(fields)) {
+      return res.status(400).json(invalidLabelResponse);
     }
 
     const newlyCreatedAddress = await Address.create({
       userId,
+      label: "",
       pincode: "",
       notes: "",
       ...fields,
@@ -88,8 +103,12 @@ const editAddress = async (req, res) => {
     if (clearedRequired.length) {
       return res.status(400).json({
         success: false,
+        field: clearedRequired[0],
         message: `These fields cannot be empty: ${clearedRequired.join(", ")}`,
       });
+    }
+    if (isInvalidLabel(fields)) {
+      return res.status(400).json(invalidLabelResponse);
     }
 
     const address = await Address.findOneAndUpdate({ _id: addressId, userId }, fields, {

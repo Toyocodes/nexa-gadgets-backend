@@ -1,4 +1,5 @@
 const Product = require("../../models/Product");
+const { keywordMatch } = require("../../helpers/keyword-match");
 
 const searchProducts = async (req, res) => {
   try {
@@ -10,24 +11,7 @@ const searchProducts = async (req, res) => {
       });
     }
 
-    // Escape regex metacharacters so user input is matched literally
-    // (prevents regex injection / ReDoS), and cap the length.
-    const escaped = keyword
-      .trim()
-      .slice(0, 100)
-      .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const regEx = new RegExp(escaped, "i");
-
-    const createSearchQuery = {
-      $or: [
-        { title: regEx },
-        { description: regEx },
-        { category: regEx },
-        { brand: regEx },
-      ],
-    };
-
-    const searchResults = await Product.find(createSearchQuery);
+    const searchResults = await Product.find(keywordMatch(keyword) || { _id: null });
 
     res.status(200).json({
       success: true,

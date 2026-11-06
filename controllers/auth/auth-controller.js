@@ -48,11 +48,12 @@ const registerUser = async (req, res) => {
       return res.status(400).json({ success: false, message: "Username, email and password are required" });
     }
     if (!EMAIL_PATTERN.test(email)) {
-      return res.status(400).json({ success: false, message: "Enter a valid email address" });
+      return res.status(400).json({ success: false, field: "email", message: "Enter a valid email address" });
     }
     if (!isValidPassword(password)) {
       return res.status(400).json({
         success: false,
+        field: "password",
         message: `Password must be at least ${PASSWORD_MIN_LENGTH} characters`,
       });
     }
@@ -60,11 +61,12 @@ const registerUser = async (req, res) => {
     if (await User.exists({ email })) {
       return res.json({
         success: false,
+        field: "email",
         message: "User Already exists with the same email! Please try again",
       });
     }
     if (await User.exists({ userName })) {
-      return res.json({ success: false, message: "That username is taken. Please choose another" });
+      return res.json({ success: false, field: "userName", message: "That username is taken. Please choose another" });
     }
 
     const newUser = await User.create({
@@ -96,6 +98,7 @@ const loginUser = async (req, res) => {
     if (!checkUser)
       return res.json({
         success: false,
+        field: "email",
         message: "User doesn't exists! Please register first",
       });
 
@@ -103,6 +106,7 @@ const loginUser = async (req, res) => {
     if (!checkPasswordMatch)
       return res.json({
         success: false,
+        field: "password",
         message: "Incorrect password! Please try again",
       });
 
@@ -127,13 +131,13 @@ const forgotPassword = async (req, res) => {
 
   try {
     if (typeof email !== "string") {
-      return res.status(400).json({ success: false, message: "Email is required" });
+      return res.status(400).json({ success: false, field: "email", message: "Email is required" });
     }
 
     const user = await User.findOne({ email });
 
     if (!user) {
-      return res.status(404).json({ success: false, message: "User not found" });
+      return res.status(404).json({ success: false, field: "email", message: "User not found" });
     }
 
     const resetToken = crypto.randomBytes(32).toString("hex");
@@ -166,6 +170,7 @@ const resetPassword = async (req, res) => {
     if (!isValidPassword(password)) {
       return res.status(400).json({
         success: false,
+        field: "password",
         message: `Password must be at least ${PASSWORD_MIN_LENGTH} characters`,
       });
     }
@@ -219,23 +224,23 @@ const updateMe = async (req, res) => {
 
     if (userName !== undefined && userName !== user.userName) {
       if (typeof userName !== "string" || !userName.trim()) {
-        return res.status(400).json({ success: false, message: "Username cannot be empty" });
+        return res.status(400).json({ success: false, field: "userName", message: "Username cannot be empty" });
       }
       if (await User.exists({ userName, _id: { $ne: user._id } })) {
-        return res.status(409).json({ success: false, message: "That username is taken" });
+        return res.status(409).json({ success: false, field: "userName", message: "That username is taken" });
       }
       user.userName = userName.trim();
     }
 
     if (email !== undefined && email !== user.email) {
       if (typeof email !== "string" || !EMAIL_PATTERN.test(email)) {
-        return res.status(400).json({ success: false, message: "Enter a valid email address" });
+        return res.status(400).json({ success: false, field: "email", message: "Enter a valid email address" });
       }
       if (!currentPassword || !(await bcrypt.compare(currentPassword, user.password))) {
-        return res.status(401).json({ success: false, message: "Current password is incorrect" });
+        return res.status(401).json({ success: false, field: "currentPassword", message: "Current password is incorrect" });
       }
       if (await User.exists({ email, _id: { $ne: user._id } })) {
-        return res.status(409).json({ success: false, message: "That email is already in use" });
+        return res.status(409).json({ success: false, field: "email", message: "That email is already in use" });
       }
       user.email = email;
     }
@@ -267,13 +272,14 @@ const changePassword = async (req, res) => {
     if (!isValidPassword(newPassword)) {
       return res.status(400).json({
         success: false,
+        field: "newPassword",
         message: `New password must be at least ${PASSWORD_MIN_LENGTH} characters`,
       });
     }
 
     const user = await User.findById(req.user.id);
     if (!user || !currentPassword || !(await bcrypt.compare(currentPassword, user.password))) {
-      return res.status(401).json({ success: false, message: "Current password is incorrect" });
+      return res.status(401).json({ success: false, field: "currentPassword", message: "Current password is incorrect" });
     }
 
     user.password = await bcrypt.hash(newPassword, 12);
@@ -299,7 +305,7 @@ const requestMagicLink = async (req, res) => {
 
   try {
     if (!email || !EMAIL_PATTERN.test(email)) {
-      return res.status(400).json({ success: false, message: "Enter a valid email address" });
+      return res.status(400).json({ success: false, field: "email", message: "Enter a valid email address" });
     }
 
     const user = await User.findOne({ email });

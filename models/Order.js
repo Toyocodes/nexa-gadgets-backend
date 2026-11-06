@@ -24,12 +24,16 @@ const OrderSchema = new mongoose.Schema({
   // Empty for pickup orders.
   addressInfo: {
     addressId: String,
+    label: String,
     address: String,
     city: String,
     pincode: String,
     phone: String,
     notes: String,
   },
+  // What the rider should know for this order. Starts from the saved address's
+  // notes at checkout, and editing it there doesn't change the saved address.
+  deliveryNotes: String,
   // Snapshot of the delivery option chosen at checkout, so later fee changes
   // don't affect this order.
   deliveryMethod: {

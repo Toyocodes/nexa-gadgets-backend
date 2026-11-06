@@ -1,7 +1,9 @@
 const mongoose = require("mongoose");
 const Product = require("../../models/Product");
+const { keywordMatch } = require("../../helpers/keyword-match");
 
 const MAX_PAGE_SIZE = 100;
+const MAX_IDS = 100;
 
 // The price a customer actually pays: the sale price when one is set.
 const EFFECTIVE_PRICE = {
@@ -32,6 +34,8 @@ const toNumber = (value) => {
  * GET /api/shop/products/get
  *
  * Query params (all optional):
+ *   q=iphone                    keyword in the title, description, category or brand
+ *   ids=<id>,<id>               only these products (up to 100), e.g. a guest's cart
  *   category=phones,laptop      comma-separated category ids
  *   brand=apple,samsung         comma-separated brand ids
  *   minPrice=0&maxPrice=20000   on the effective price (sale price if set)
@@ -51,6 +55,19 @@ const getFilteredProducts = async (req, res) => {
     if (brands.length) match.brand = { $in: brands };
     if (inStock === "true") match.totalStock = { $gt: 0 };
     if (onSale === "true") match.salePrice = { $gt: 0 };
+
+    const keyword = keywordMatch(req.query.q);
+    if (keyword) Object.assign(match, keyword);
+
+    // Aggregations don't cast strings to ObjectIds, so convert them here.
+    if (typeof req.query.ids === "string") {
+      match._id = {
+        $in: toList(req.query.ids)
+          .slice(0, MAX_IDS)
+          .filter((id) => mongoose.isObjectIdOrHexString(id))
+          .map((id) => new mongoose.Types.ObjectId(id)),
+      };
+    }
 
     const minPrice = toNumber(req.query.minPrice);
     const maxPrice = toNumber(req.query.maxPrice);

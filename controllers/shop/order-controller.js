@@ -9,6 +9,7 @@ const mongoose = require("mongoose");
 // Payments are accepted by bank transfer only. The frontend restricts the
 // Paystack popup to these channels; this is the server-side check.
 const ALLOWED_PAYMENT_CHANNELS = ["bank_transfer"];
+const NOTES_MAX_LENGTH = 300;
 
 const effectivePrice = (product) =>
   product.salePrice > 0 ? product.salePrice : product.price;
@@ -18,13 +19,24 @@ const effectivePrice = (product) =>
 // and their saved address) rather than trusted from the request body, so the
 // client cannot change what it will be charged.
 //
-// Body: { deliveryOptionId, addressInfo: { addressId } }
+// Body: { deliveryOptionId, addressInfo: { addressId }, notes }
 // addressInfo is required only when the delivery option's type is "delivery".
+// notes is optional and only used for delivery; leaving it out uses the saved
+// address's notes, and an empty string means no notes for this order.
 const createOrder = async (req, res) => {
   try {
     const userId = req.user.id;
     const { deliveryOptionId } = req.body;
     const addressId = req.body.addressInfo?.addressId;
+    const { notes } = req.body;
+
+    if (notes !== undefined && (typeof notes !== "string" || notes.length > NOTES_MAX_LENGTH)) {
+      return res.status(400).json({
+        success: false,
+        field: "notes",
+        message: `Keep delivery notes to ${NOTES_MAX_LENGTH} characters or fewer`,
+      });
+    }
 
     const cart = await Cart.findOne({ userId }).populate({
       path: "items.productId",
@@ -84,6 +96,7 @@ const createOrder = async (req, res) => {
       addressInfo: address
         ? {
             addressId: address._id.toString(),
+            label: address.label,
             address: address.address,
             city: address.city,
             pincode: address.pincode,
@@ -91,6 +104,7 @@ const createOrder = async (req, res) => {
             notes: address.notes,
           }
         : undefined,
+      deliveryNotes: address ? (notes !== undefined ? notes.trim() : address.notes || "") : "",
       deliveryMethod: {
         optionId: deliveryOption._id.toString(),
         name: deliveryOption.name,

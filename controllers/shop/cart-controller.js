@@ -1,6 +1,9 @@
 const Cart = require("../../models/Cart");
 const Product = require("../../models/Product");
 
+const MAX_MERGE_ITEMS = 50;
+const OBJECT_ID_PATTERN = /^[a-f\d]{24}$/i;
+
 const addToCart = async (req, res) => {
   try {
     const { userId, productId, quantity } = req.body;
@@ -229,8 +232,98 @@ const deleteCartItem = async (req, res) => {
   }
 };
 
+// Moves a guest's browser cart into their account after they sign in.
+// Body: { items: [{ productId, quantity }] }
+//
+// Quantities add to what's already in the cart and are capped at current stock.
+// Lines that are gone or had to be reduced are reported in `adjustments`, so one
+// sold-out product doesn't fail the whole merge.
+const mergeCart = async (req, res) => {
+  try {
+    const { userId, items } = req.body;
+
+    if (!Array.isArray(items) || items.length > MAX_MERGE_ITEMS) {
+      return res.status(400).json({
+        success: false,
+        message: `Send up to ${MAX_MERGE_ITEMS} cart items to merge`,
+      });
+    }
+
+    // Combine duplicates and ignore anything malformed.
+    const wanted = new Map();
+    for (const item of items) {
+      const productId = String(item?.productId);
+      const quantity = Number(item?.quantity);
+      if (OBJECT_ID_PATTERN.test(productId) && Number.isInteger(quantity) && quantity > 0) {
+        wanted.set(productId, (wanted.get(productId) || 0) + quantity);
+      }
+    }
+
+    const products = await Product.find({ _id: { $in: [...wanted.keys()] } }).select(
+      "title totalStock"
+    );
+    const productById = new Map(products.map((p) => [p._id.toString(), p]));
+
+    const cart = (await Cart.findOne({ userId })) || new Cart({ userId, items: [] });
+    const adjustments = [];
+
+    for (const [productId, quantity] of wanted) {
+      const product = productById.get(productId);
+      if (!product) {
+        adjustments.push({ productId, title: null, quantity: 0 });
+        continue;
+      }
+
+      const line = cart.items.find((item) => item.productId.toString() === productId);
+      const current = line ? line.quantity : 0;
+      const stock = Math.max(product.totalStock || 0, 0);
+      // Never lower a quantity the customer already had in their account cart.
+      const merged = Math.max(Math.min(current + quantity, stock), current);
+
+      if (merged > current) {
+        if (line) line.quantity = merged;
+        else cart.items.push({ productId, quantity: merged });
+      }
+      if (merged < current + quantity) {
+        adjustments.push({ productId, title: product.title, quantity: merged });
+      }
+    }
+
+    await cart.save();
+    await cart.populate({
+      path: "items.productId",
+      select: "image title price salePrice",
+    });
+
+    const validItems = cart.items.filter((item) => item.productId);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        ...cart._doc,
+        items: validItems.map((item) => ({
+          productId: item.productId._id,
+          image: item.productId.image,
+          title: item.productId.title,
+          price: item.productId.price,
+          salePrice: item.productId.salePrice,
+          quantity: item.quantity,
+        })),
+      },
+      adjustments,
+    });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({
+      success: false,
+      message: "Error",
+    });
+  }
+};
+
 module.exports = {
   addToCart,
+  mergeCart,
   updateCartItemQty,
   deleteCartItem,
   fetchCartItems,
